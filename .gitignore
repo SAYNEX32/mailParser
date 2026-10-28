@@ -1,6 +1,7 @@
 # Секреты
 secret/
 .env
+.env.example
 *.json.bak
 
 # База данных
