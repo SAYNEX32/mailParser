@@ -7,15 +7,16 @@
 
 ## Текущий статус
 
-Реализован **этап 1**: подключение к Gmail по OAuth 2.0, парсинг MIME-структуры
-и выгрузка нормализованных писем в JSON.
+Реализованы **этапы 1, 3 и 4**: подключение к Gmail по OAuth 2.0, парсинг
+MIME-структуры, нормализация в единый формат и rule-based классификация
+писем на четыре категории.
 
 | Этап | Статус |
 |------|--------|
 | 1. Gmail (OAuth 2.0, list/get, парсинг) | ✅ готово |
 | 2. Mail.ru (IMAP + пароль приложения) | ⬜ не начато |
 | 3. Нормализация в единый формат | ✅ готово (`src/models.py`) |
-| 4. Правила классификации (4 категории) | ⬜ не начато |
+| 4. Правила классификации (4 категории) | ✅ готово (`src/classifier.py`) |
 | 5. Хранение (SQLite/PostgreSQL) | ⬜ не начато |
 | 6. ML / гибридный режим (опционально) | ⬜ не начато |
 
@@ -24,12 +25,19 @@
 ```
 src/
 ├── config.py        # конфигурация из .env, пути проекта
-├── models.py        # нормализованные модели Email / Attachment
+├── models.py        # модели Email / Attachment / Classification
 ├── gmail_auth.py    # OAuth: загрузка токена и его обновление
 ├── gmail_client.py  # обёртка над Gmail API (list_ids / get_message)
 ├── parsing.py       # MIME-парсинг, HTML → plain text
-├── main.py          # CLI: выгрузка писем в data/emails.json
+├── classifier.py    # правила классификации + CLI для калибровки
+├── main.py          # CLI: выгрузка писем с классификацией
 └── test_gmail.py    # смоук-тест доступа к Gmail API
+tests/
+├── test_parsing.py    # MIME-парсинг и вспомогательные функции
+└── test_classifier.py # правила классификации
+data/
+├── whitelist.example.txt  # шаблон белого списка (контакты) → whitelist.txt
+└── blacklist.example.txt  # шаблон чёрного списка → blacklist.txt
 ```
 
 ## Установка
@@ -125,15 +133,86 @@ GMAIL_ACCOUNT=you@gmail.com
 # проверка доступа к API
 python src/test_gmail.py --max 5
 
-# выгрузка 50 последних писем из INBOX в data/emails.json
+# выгрузка 50 последних писем из INBOX в data/emails.json (с классификацией)
 python src/main.py --limit 50
+
+# показать сработавшие правила
+python src/main.py --limit 5 --show-rules
+
+# только сбор, без классификации
+python src/main.py --limit 100 --no-classify
 
 # произвольный Gmail-запрос, все метки
 python src/main.py --limit 20 --query "is:unread" --label all
 ```
 
 Флаги CLI: `--limit`, `--query`, `--label` (можно несколько раз, `all` — без
-фильтра по меткам), `--out`.
+фильтра по меткам), `--out`, `--no-classify`, `--show-rules`.
+
+Каждое письмо в JSON получает блок:
+
+```json
+"classification": {
+  "category": "important",
+  "confidence": 0.87,
+  "method": "rules",
+  "reasons": ["sender_in_whitelist", "urgent_keyword"],
+  "explanation": [
+    "отправитель в белом списке",
+    "в тексте есть слова срочности/требования действия"
+  ]
+}
+```
+
+## Классификация
+
+Реализован **rule-based** движок (SPEC §6.2, уровень 1): каждое правило
+добавляет вес одной из четырёх категорий, итог — максимум суммы весов.
+
+| Категория | Ключ | Что означает |
+|---|---|---|
+| Важные | `important` | Нужно действие/ответ: срочность, счета, договоры, письма от контактов |
+| Полезные | `useful` | Рассылки по подписке, уведомления сервисов, дайджесты |
+| Спорные | `disputed` | Буфер: смешанные сигналы или нет признаков — на ручной разбор |
+| Спам | `spam` | Чёрный список, лотереи/азарт, реклама без подписки, метка Gmail SPAM |
+
+Используемые признаки: белый/чёрный список (адрес или домен), ключевые слова
+tемы и тела (RU/EN), `List-Unsubscribe` / `Precedence: bulk` / `List-Id`,
+SPF/DKIM/DMARC из `Authentication-Results`, домены ссылок (подозрительные TLD,
+сокращатели URL, punycode), имена и расширения вложений, подмена бренда в
+имени отправителя, `Reply-To` на чужом домене, метки Gmail
+(`IMPORTANT`, `CATEGORY_*`, `SPAM`) и признак ответа в переписке.
+
+**Принцип «Спорные» (SPEC §6.4):** если сработали и «важные», и «спам»-правила
+или есть подозрения на фишинг, письмо не уйдёт в «Спам» автоматически —
+останется в `disputed`.
+
+### Свои списки отправителей
+
+```bash
+cp data/whitelist.example.txt data/whitelist.txt   # контакты/домены → «Важные»
+cp data/blacklist.example.txt data/blacklist.txt   # адреса/домены → «Спам»
+```
+
+Формат: одно значение в строке (адрес или домен, поддомены учитываются),
+`#` — комментарий. Файлы не коммитятся (персональные данные).
+
+### Калибровка правил на готовой выгрузке
+
+```bash
+# распределение по категориям на data/emails.json
+python src/classifier.py
+
+# только спорные, с объяснением правил, в файл
+python src/classifier.py data/emails.json --show disputed --explain --limit 20
+python src/classifier.py data/emails.json --out data/emails_classified.json
+```
+
+### Тесты
+
+```bash
+python -m pytest tests -q
+```
 
 ## Безопасность
 
@@ -143,15 +222,14 @@ python src/main.py --limit 20 --query "is:unread" --label all
 - `.env` и `.env.example` — локальные переменные окружения (шаблон — в этом
   README, раздел «Конфигурация (.env)»);
 - `data/*.json` — выгрузки с реальными письмами (персональные данные);
+- `data/whitelist.txt`, `data/blacklist.txt` — личные списки контактов;
 - `data/*.db`, `data/*.sqlite3` — базы данных.
 
 Токены хранятся вне проекта (`GMAIL_TOKEN_PATH`), не коммитятся.
 
 ## Дальше
 
-1. `src/classifier.py` — rule-based правила для четырёх категорий
-   (whitelist/blacklist, ключевые слова, `List-Unsubscribe`, спам-паттерны).
-2. `src/storage.py` — SQLite через SQLAlchemy (схема из SPEC §7.2)
+1. `src/storage.py` — SQLite через SQLAlchemy (схема из SPEC §7.2)
    и инкрементальная синхронизация по `historyId`.
-3. IMAP-клиент для Mail.ru.
-4. Сбор обратной связи по «Спорным» и опциональная ML-модель.
+2. IMAP-клиент для Mail.ru (этап 2).
+3. Отчёт/дайджест по «Спорным» и сбор обратной связи для будущей ML-модели.

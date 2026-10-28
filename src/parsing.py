@@ -121,8 +121,8 @@ def headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
 
 
 def split_addresses(raw: str) -> list[str]:
-    """'Имя <a@b>, c@d' → ['a@b', 'c@d']."""
-    return [addr for _, addr in getaddresses([raw or ""]) if addr]
+    """'Имя <a@b>, c@d' → ['a@b', 'c@d'] (мусор без '@' отбрасывается)."""
+    return [addr for _, addr in getaddresses([raw or ""]) if addr and "@" in addr]
 
 
 def parse_address(raw: str) -> tuple[str, str]:

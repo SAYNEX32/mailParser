@@ -17,6 +17,8 @@ venv/
 
 # Выгрузки с реальными письмами (персональные данные)
 data/*.json
+data/whitelist.txt
+data/blacklist.txt
 
 # Кэш линтеров/инструментов
 .ruff_cache/
