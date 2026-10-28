@@ -7,9 +7,10 @@
 
 ## Текущий статус
 
-Реализованы **этапы 1, 3 и 4**: подключение к Gmail по OAuth 2.0, парсинг
-MIME-структуры, нормализация в единый формат и rule-based классификация
-писем на четыре категории.
+Реализованы **этапы 1, 3, 4 и 5**: подключение к Gmail по OAuth 2.0, парсинг
+MIME-структуры, нормализация в единый формат, rule-based классификация писем
+на четыре категории и накопительное хранилище (SQLite) с инкрементальной
+синхронизацией по `historyId`.
 
 | Этап | Статус |
 |------|--------|
@@ -17,7 +18,7 @@ MIME-структуры, нормализация в единый формат �
 | 2. Mail.ru (IMAP + пароль приложения) | ⬜ не начато |
 | 3. Нормализация в единый формат | ✅ готово (`src/models.py`) |
 | 4. Правила классификации (4 категории) | ✅ готово (`src/classifier.py`) |
-| 5. Хранение (SQLite/PostgreSQL) | ⬜ не начато |
+| 5. Хранение (SQLite/PostgreSQL) | ✅ готово (`src/storage.py`) |
 | 6. ML / гибридный режим (опционально) | ⬜ не начато |
 
 ## Структура
@@ -30,9 +31,13 @@ src/
 ├── gmail_client.py  # обёртка над Gmail API (list_ids / get_message)
 ├── parsing.py       # MIME-парсинг, HTML → plain text
 ├── classifier.py    # правила классификации + CLI для калибровки
-├── main.py          # CLI: выгрузка писем с классификацией
+├── storage.py       # SQLite/PostgreSQL (SQLAlchemy) + CLI
+├── main.py          # CLI: сбор + классификация + запись в БД
 └── test_gmail.py    # смоук-тест доступа к Gmail API
 tests/
+├── test_parsing.py    # MIME-парсинг и вспомогательные функции
+├── test_classifier.py # правила классификации
+└── test_storage.py    # хранилище, импорт/экспорт, meta
 ├── test_parsing.py    # MIME-парсинг и вспомогательные функции
 └── test_classifier.py # правила классификации
 data/
@@ -133,23 +138,27 @@ GMAIL_ACCOUNT=you@gmail.com
 # проверка доступа к API
 python src/test_gmail.py --max 5
 
-# выгрузка 50 последних писем из INBOX в data/emails.json (с классификацией)
+# первый сбор: 50 писем из INBOX → БД + классификация
 python src/main.py --limit 50
+
+# дальше — только новое (historyId), можно повесить в cron/планировщик
+python src/main.py --limit 200 --sync
 
 # показать сработавшие правила
 python src/main.py --limit 5 --show-rules
 
-# только сбор, без классификации
-python src/main.py --limit 100 --no-classify
+# только сбор, без классификации и без БД
+python src/main.py --limit 100 --no-classify --no-db
 
 # произвольный Gmail-запрос, все метки
 python src/main.py --limit 20 --query "is:unread" --label all
 ```
 
 Флаги CLI: `--limit`, `--query`, `--label` (можно несколько раз, `all` — без
-фильтра по меткам), `--out`, `--no-classify`, `--show-rules`.
+фильтра по меткам), `--db` / `--no-db`, `--sync`, `--out`, `--no-classify`,
+`--show-rules`.
 
-Каждое письмо в JSON получает блок:
+Каждое письмо получает блок классификации:
 
 ```json
 "classification": {
@@ -214,6 +223,46 @@ python src/classifier.py data/emails.json --out data/emails_classified.json
 python -m pytest tests -q
 ```
 
+## Хранилище
+
+По умолчанию письма пишутся в SQLite (`DATABASE_URL`, по умолчанию
+`sqlite:///data/emails.db`). Уникальность — по паре `(source, message_id)`,
+поэтому повторный сбор и импорт старых JSON-выгрузок **не создаёт дублей**,
+а обновляет записи: так и накапливается история.
+
+Схема — SPEC §7.2 плюс служебные поля: `body_html`, `attachments`, `labels`,
+`headers_raw`, `reasons`, `created_at` / `updated_at`; таблица `meta` хранит
+`historyId` для инкрементальной синхронизации.
+
+```bash
+# схема (идемпотентно)
+python src/storage.py --init
+
+# догрузить старые выгрузки в базу
+python src/storage.py --import data/emails.json --import data/dump_all.json
+
+# статистика по категориям
+python src/storage.py --stats
+
+# разбор спорных / спама
+python src/storage.py --show disputed --limit 20
+python src/storage.py --show spam --limit 20
+
+# выгрузить всё из базы в JSON
+python src/storage.py --export data/backup.json
+```
+
+Флаг `--db` (у `storage.py` и `main.py`) позволяет взять другую базу:
+
+```bash
+python src/main.py --limit 100 --db sqlite:///data/archive.db
+python src/main.py --limit 100 --db postgresql+psycopg://user:pass@localhost/mail
+```
+
+Стратегия накопления: сначала полный сбор с широким запросом, затем регулярно
+`--sync` (только новые письма по `historyId`). Если Gmail уже удалил историю,
+скрипт сам откатится к полной синхронизации.
+
 ## Безопасность
 
 В репозиторий **не попадают**:
@@ -223,13 +272,13 @@ python -m pytest tests -q
   README, раздел «Конфигурация (.env)»);
 - `data/*.json` — выгрузки с реальными письмами (персональные данные);
 - `data/whitelist.txt`, `data/blacklist.txt` — личные списки контактов;
-- `data/*.db`, `data/*.sqlite3` — базы данных.
+- `data/*.db`, `data/*.sqlite3` — базы данных (включая `data/emails.db`).
 
 Токены хранятся вне проекта (`GMAIL_TOKEN_PATH`), не коммитятся.
 
 ## Дальше
 
-1. `src/storage.py` — SQLite через SQLAlchemy (схема из SPEC §7.2)
-   и инкрементальная синхронизация по `historyId`.
-2. IMAP-клиент для Mail.ru (этап 2).
-3. Отчёт/дайджест по «Спорным» и сбор обратной связи для будущей ML-модели.
+1. IMAP-клиент для Mail.ru (этап 2) — с сохранением в ту же схему (`source="mailru"`).
+2. Дайджест/отчёт по «Спорным» и сбор обратной связи (подтверждение категории)
+   для будущей ML-модели.
+3. Простановка меток в Gmail (нужен scope `gmail.modify`).
