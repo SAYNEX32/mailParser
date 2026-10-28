@@ -16,7 +16,11 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 def _load_json(path: Path) -> dict:
     if not path.exists():
-        sys.exit(f"[!] Файл не найден: {path}")
+        sys.exit(
+            f"[!] Файл не найден: {path}\n"
+            "    Проверьте GMAIL_TOKEN_PATH и GMAIL_ACCOUNT в .env "
+            "(см. README, раздел «Конфигурация (.env)»)."
+        )
     try:
         with path.open(encoding="utf-8") as fh:
             return json.load(fh)

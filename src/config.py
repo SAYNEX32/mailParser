@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -32,9 +33,17 @@ def _env_path(name: str, default: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Gmail
 # ---------------------------------------------------------------------------
-GMAIL_ACCOUNT: str = os.getenv("GMAIL_ACCOUNT", "artemmichin32ru@gmail.com")
+# Ящик, с которым работаем. Значения по умолчанию нет — задаётся в .env.
+GMAIL_ACCOUNT: str = (os.getenv("GMAIL_ACCOUNT") or "").strip()
 
-# Файл с сохранёнными OAuth-токенами (access/refresh)
+
+def account_slug(account: str) -> str:
+    """'user@gmail.com' → 'user-gmail-com' (имя папки в хранилище токенов)."""
+    return re.sub(r"[^a-z0-9]+", "-", account.lower()).strip("-") or "default"
+
+
+# Файл с сохранёнными OAuth-токенами (access/refresh).
+# По умолчанию путь строится из GMAIL_ACCOUNT, чтобы адрес не был зашит в код.
 GMAIL_TOKEN_PATH: Path = _env_path(
     "GMAIL_TOKEN_PATH",
     Path.home()
@@ -42,7 +51,7 @@ GMAIL_TOKEN_PATH: Path = _env_path(
     / "automation"
     / "gmail"
     / "accounts"
-    / "artemmichin32ru-gmail-com"
+    / account_slug(GMAIL_ACCOUNT)
     / "gmail-tokens.json",
 )
 

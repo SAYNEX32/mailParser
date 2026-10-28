@@ -13,7 +13,7 @@ import sys
 
 from googleapiclient.errors import HttpError
 
-from config import GMAIL_CLIENT_SECRET_PATH, GMAIL_TOKEN_PATH
+from config import GMAIL_ACCOUNT, GMAIL_CLIENT_SECRET_PATH, GMAIL_TOKEN_PATH
 from gmail_auth import load_credentials
 from gmail_client import GmailClient
 
@@ -28,7 +28,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    print(f"[*] Аккаунт: {GMAIL_TOKEN_PATH.parent.name}")
+    print(f"[*] Аккаунт: {GMAIL_ACCOUNT or '(не задан в .env)'}")
     print(f"[*] Токены:  {GMAIL_TOKEN_PATH}")
     print(f"[*] Client:  {GMAIL_CLIENT_SECRET_PATH}")
 

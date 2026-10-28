@@ -44,8 +44,9 @@ pip install -r requirements.txt
 
 Файл `.env` **не хранится в репозитории** и создаётся вручную в корне проекта
 (рядом с `README.md`). Всё, что в нём не задано, берётся из значений по
-умолчанию в `src/config.py` — для локального запуска достаточно только
-`GMAIL_ACCOUNT`.
+умолчанию в `src/config.py`. Единственная переменная, которую нужно задать
+для работы с Gmail, — `GMAIL_ACCOUNT`: от неё автоматически строится путь
+к файлу токенов.
 
 Windows (PowerShell):
 
@@ -82,12 +83,16 @@ GMAIL_ACCOUNT=you@gmail.com
 
 | Переменная | Обязательна | По умолчанию | Назначение |
 |---|---|---|---|
-| `GMAIL_ACCOUNT` | нет | `artemmichin32ru@gmail.com` | Ящик, с которым работаем |
-| `GMAIL_TOKEN_PATH` | нет | `~/.config/automation/gmail/accounts/<account>/gmail-tokens.json` | Файл с OAuth-токенами (вне проекта) |
+| `GMAIL_ACCOUNT` | да | — (пусто) | Ящик, с которым работаем. Адрес не зашит в код |
+| `GMAIL_TOKEN_PATH` | нет | `~/.config/automation/gmail/accounts/<account-slug>/gmail-tokens.json`, где `<account-slug>` = `GMAIL_ACCOUNT` в нижнем регистре, не-буквенно-цифровые символы → `-` (`user@gmail.com` → `user-gmail-com`) | Файл с OAuth-токенами (вне проекта) |
 | `GMAIL_CLIENT_SECRET_PATH` | нет | первый `secret/client_secret*.json` | OAuth client типа Desktop app |
 | `DATABASE_URL` | нет | `sqlite:///data/emails.db` | Хранилище (пока не используется) |
 | `MAILRU_EMAIL` | нет | — | Ящик Mail.ru (этап 2) |
 | `MAILRU_APP_PASSWORD` | нет | — | Пароль для внешнего приложения (этап 2) |
+
+Пример: `GMAIL_ACCOUNT=user@gmail.com` → токены ищутся в
+`~/.config/automation/gmail/accounts/user-gmail-com/gmail-tokens.json`.
+Если файл не найден, `src/gmail_auth.py` подскажет проверить `.env`.
 
 ## Настройка Gmail (OAuth 2.0)
 
