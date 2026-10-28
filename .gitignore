@@ -1,0 +1,22 @@
+# Секреты
+secret/
+.env
+*.json.bak
+
+# База данных
+data/*.db
+data/*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Выгрузки с реальными письмами (персональные данные)
+data/*.json
+
+# Кэш линтеров/инструментов
+.ruff_cache/
+.git-credentials
